@@ -137,6 +137,7 @@ void SysTick_Handler(void){
 void EXTI0_IRQHandler(void) {
 	EXTI->PR = EXTI_PR_PR0;
 	if (checkButton()) {
+		buttonState = 1;
 		menu_select_counter++;
 		if(menu_select_counter > 4) menu_select_counter = 0;	
 		startup_screen_status = 0;
