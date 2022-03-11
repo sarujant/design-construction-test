@@ -10,7 +10,7 @@ void SysTick_Handler(void);
 void EXTI0_IRQHandler(void);
 
 void initialise_adc(void);
-void timer_etr_setup(void);
+void timer_counter_setup(void);
 void dac_out(void);
 
 void dc_voltage(void);
@@ -30,6 +30,9 @@ const int STARTUP_SCREEN_DELAY = 5;
 const int BTN_DEBOUNCER_DELAY = 3;
 int btn_tick_count = 0;
 int cache_btn_tick_count = 0;
+int timer_cnt = 0;
+
+int ADC_dc_sample_count = 0;
 
 uint32_t adc1_conv;
 uint32_t adc2_conv;
@@ -144,6 +147,8 @@ void SysTick_Handler(void){
 	}
 	sleep_tick_count++;
 	btn_tick_count++;
+	timer_cnt++;
+	
 }
 
 void EXTI0_IRQHandler(void) {
@@ -191,32 +196,40 @@ void dc_voltage(void) {
 	int ADC1_dc_sample_count = 0;
 	float ADC2_dc_reading_sum = 0;
 	int ADC2_dc_sample_count = 0;
-
+	
 	// redo some of this with the timer/external trigger input instead
-	while(ADC1_dc_sample_count != 50000){
+	while(timer_cnt != 2){
 		ADC1->CR2 |= ADC_CR2_SWSTART_Msk; 
 		while(ADC1->SR != (ADC1->SR | ADC_SR_EOC_Msk)){}
+			
 		adc1_conv = ADC1->DR;
-		
 		ADC1_dc_reading_sum += adc1_conv;
-		ADC1_dc_sample_count++;
 	}
 	
-	float ADC1_dc_raw_average = ADC1_dc_reading_sum/ADC1_dc_sample_count;
+	if(timer_cnt == 2) {
+		ADC_dc_sample_count = TIM1->CNT;
+		timer_cnt = 0;
+	}
+	
+	float ADC1_dc_raw_average = ADC1_dc_reading_sum/ADC_dc_sample_count;
 		
 	if(ADC1_dc_raw_average <= 40.96) {
 		ADC1_dc_raw_average = 0;
 			
-		while(ADC2_dc_sample_count != 50000){			
+		while(timer_cnt != 2){			
 			ADC2->CR2 |= ADC_CR2_SWSTART_Msk; 
 			while(ADC2->SR != (ADC2->SR | ADC_SR_EOC_Msk)){} 
 				
 			adc2_conv = ADC2->DR;	
 			ADC2_dc_reading_sum += adc2_conv;
-			ADC2_dc_sample_count++;
 		}
 		
-		float ADC2_dc_raw_average = ADC2_dc_reading_sum/ADC2_dc_sample_count;
+		if(timer_cnt == 2) {
+		ADC_dc_sample_count = TIM1->CNT;
+		timer_cnt = 0;
+		}
+		
+		float ADC2_dc_raw_average = ADC2_dc_reading_sum/ADC_dc_sample_count;
 			
 		float ADC2_real_dc_voltage = (ADC2_dc_raw_average/ADC2_RESOLUTION) * ADC_VOLTAGE_REFERENCE;
 		float ADC2_output_dc_voltage = (((20 * ADC2_real_dc_voltage) - 30)/3) + ADC2_DC_OFFSET;
@@ -298,7 +311,7 @@ void initialise_adc(void) {
 	ADC2->CR2 |= ADC_CR2_EOCS_Msk;
 }
 
-void timer_etr_setup(void){
+void timer_counter_setup(void){
 	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOEEN;
 	RCC->APB2ENR |= RCC_APB2ENR_TIM1EN;// Enables TIM1
 	
@@ -312,6 +325,16 @@ void timer_etr_setup(void){
 	
 	TIM1->SMCR |= TIM_SMCR_ECE;
 	TIM1->CR1 |= TIM_CR1_CEN;
+	
+	/*
+	could potentially replace the two respective sample count counters to just a single one 
+	the sample count needed isn't initially set
+	see how much the counter counts in one second using the timer thingy which should be the frequency
+		of the signal generator.
+	make a reading every time the counter goes up and add it to the sum value
+	once reaching 1 second, set adc sample count to counter and divide the sum by the sample count
+	use systick handler as this counts twice every second atm so 2 counts = 1 second
+	*/
 }
 
 void dac_out(void) {
