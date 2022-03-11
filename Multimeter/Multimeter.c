@@ -174,27 +174,78 @@ void dc_voltage(void) {
 	PB_LCD_GoToXY (0, 0);
 	PB_LCD_WriteString("---DC Voltage---", 50);
 	
+	const int ADC_VOLTAGE_REFERENCE = 3;
+	const int ADC1_RESOLUTION = 4096;
+	const float ADC2_RESOLUTION = 40.96;
+	const float ADC1_DC_OFFSET;
+	const float ADC2_DC_OFFSET;
+	
 	delay(STARTUP_SCREEN_DELAY);
 	
 	PB_LCD_Clear();
 	PB_LCD_GoToXY(0,0);
 	
-	// Okay but how are we gonna know which ADC to use before we know the output voltage as if we are using different ADCs depending on output, 
-	// 	we need to know the output of the ADC first to determine whether it's in the 10V range or 1V range to use either ADC1 or ADC2.
 	
-	ADC1->CR2 |= ADC_CR2_SWSTART_Msk; 
-	while(ADC1->SR != (ADC1->SR | ADC_SR_EOC_Msk)){}
-	adc1_conv = ADC1->DR;
 		
-	if(adc1_conv < 40.96) {
-		adc1_conv = 0;
-		ADC2->CR2 |= ADC_CR2_SWSTART_Msk; 
-		while(ADC2->SR != (ADC2->SR | ADC_SR_EOC_Msk)){} 
-		adc2_conv = ADC2->DR;	
+	float ADC1_dc_reading_sum = 0;
+	int ADC1_dc_sample_count = 0;
+	float ADC2_dc_reading_sum = 0;
+	int ADC2_dc_sample_count = 0;
+
+	// redo some of this with the timer/external trigger input instead
+	while(ADC1_dc_sample_count != 50000){
+		ADC1->CR2 |= ADC_CR2_SWSTART_Msk; 
+		while(ADC1->SR != (ADC1->SR | ADC_SR_EOC_Msk)){}
+		adc1_conv = ADC1->DR;
+		
+		ADC1_dc_reading_sum += adc1_conv;
+		ADC1_dc_sample_count++;
 	}
 	
-	
-	 
+	float ADC1_dc_raw_average = ADC1_dc_reading_sum/ADC1_dc_sample_count;
+		
+	if(ADC1_dc_raw_average <= 40.96) {
+		ADC1_dc_raw_average = 0;
+			
+		while(ADC2_dc_sample_count != 50000){			
+			ADC2->CR2 |= ADC_CR2_SWSTART_Msk; 
+			while(ADC2->SR != (ADC2->SR | ADC_SR_EOC_Msk)){} 
+				
+			adc2_conv = ADC2->DR;	
+			ADC2_dc_reading_sum += adc2_conv;
+			ADC2_dc_sample_count++;
+		}
+		
+		float ADC2_dc_raw_average = ADC2_dc_reading_sum/ADC2_dc_sample_count;
+			
+		float ADC2_real_dc_voltage = (ADC2_dc_raw_average/ADC2_RESOLUTION) * ADC_VOLTAGE_REFERENCE;
+		float ADC2_output_dc_voltage = (((20 * ADC2_real_dc_voltage) - 30)/3) + ADC2_DC_OFFSET;
+		
+		PB_LCD_Clear();
+		char output_dc_voltage[50]; 
+		int output_dc_voltage_length = snprintf(output_dc_voltage, 50, "V-DC     %.4gmV", ADC2_output_dc_voltage);
+		PB_LCD_WriteString(output_dc_voltage, output_dc_voltage_length);
+		PB_LCD_GoToXY(0, 1);
+		PB_LCD_WriteString("100mV", 50);
+		
+		ADC2_dc_reading_sum = ADC2_dc_raw_average;
+		ADC2_dc_sample_count = 1;
+		
+	} else {
+		float ADC1_real_dc_voltage = (ADC1_dc_raw_average/ADC1_RESOLUTION) * ADC_VOLTAGE_REFERENCE;
+		float ADC1_output_dc_voltage = (((20 * ADC1_real_dc_voltage) - 30)/3) + ADC1_DC_OFFSET;
+		
+		PB_LCD_Clear();
+		char output_dc_voltage[50]; 
+		int output_dc_voltage_length = snprintf(output_dc_voltage, 50, "V-DC      %.4gV", ADC1_output_dc_voltage);
+		PB_LCD_WriteString(output_dc_voltage, output_dc_voltage_length);
+		PB_LCD_GoToXY(0, 1);
+		PB_LCD_WriteString("10V", 50);
+		
+		ADC1_dc_reading_sum = ADC1_dc_raw_average;
+		ADC1_dc_sample_count = 1;		
+		
+	}
 	
 	
 }
