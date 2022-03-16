@@ -9,7 +9,8 @@ int checkButton(void);
 void SysTick_Handler(void);
 void EXTI0_IRQHandler(void);
 
-void initialise_adc(void);
+void initialise_adc1(void);
+void initialise_adc2(void);
 void timer_counter_setup(void);
 void dac_out(void);
 void mux_select_in(void);
@@ -58,7 +59,8 @@ int main() {
 	
 	
 	PB_LCD_Init(); // Initialises the LCD screen
-	initialise_adc();
+	initialise_adc1();
+	initialise_adc2();
 	dac_out();
 	
 	while(1) {
@@ -124,11 +126,11 @@ void menu() {
 void configPA0(void) { 
 	// Configures PA0 as a input.
 	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
-	GPIOE->MODER &= ~GPIO_MODER_MODE0_Msk;
-	GPIOE->OTYPER &= ~GPIO_OTYPER_OT0_Msk;
-	GPIOE->OSPEEDR &= ~GPIO_OSPEEDR_OSPEED0_Msk;
-	GPIOE->PUPDR &= ~GPIO_PUPDR_PUPD0_Msk;
-	GPIOE->PUPDR |= 1 << GPIO_PUPDR_PUPD0_Pos;
+	GPIOA->MODER &= ~GPIO_MODER_MODE0_Msk;
+	GPIOA->OTYPER &= ~GPIO_OTYPER_OT0_Msk;
+	GPIOA->OSPEEDR &= ~GPIO_OSPEEDR_OSPEED0_Msk;
+	GPIOA->PUPDR &= ~GPIO_PUPDR_PUPD0_Msk;
+	GPIOA->PUPDR |= 1 << GPIO_PUPDR_PUPD0_Pos;
 		
 	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; // Enables System config
 	SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI0_PA; // PA0 -> config interrupt to come from PA0
@@ -230,8 +232,7 @@ void dc_voltage(void) {
 	
 	// Instantiates the function specific (local) variables & constants.
 	const int ADC_VOLTAGE_REFERENCE = 3;
-	const int ADC1_RESOLUTION = 4096;
-	const float ADC2_RESOLUTION = 40.96;
+	const int ADC_RESOLUTION = 4096;
 	const float ADC1_DC_OFFSET = 0;
 	const float ADC2_DC_OFFSET = 0;
 	
@@ -265,7 +266,7 @@ void dc_voltage(void) {
 	float ADC1_dc_raw_average = ADC1_dc_reading_sum/ADC_dc_sample_count; // Takes the average reading of the ADC at the frequency given.
 	
 	// Determines whether ADC1 or ADC2 is used if the average is below a certain threshold as ADC2 is used in the 100mV range.	
-	if(ADC1_dc_raw_average <= ADC2_RESOLUTION) { 
+	if((2048 - 20.48) <= ADC1_dc_raw_average <= (2048 + 20.48)) { 
 		ADC1_dc_raw_average = 0;
 			
 		// Similar to ADC1 but for ADC2 instead.
@@ -284,17 +285,17 @@ void dc_voltage(void) {
 		
 		float ADC2_dc_raw_average = ADC2_dc_reading_sum/ADC_dc_sample_count;
 			
-		float ADC2_real_dc_voltage = (ADC2_dc_raw_average/ADC2_RESOLUTION) * ADC_VOLTAGE_REFERENCE; // Changed back into an analogue value of voltage.
+		float ADC2_real_dc_voltage = (ADC2_dc_raw_average/ADC_RESOLUTION) * ADC_VOLTAGE_REFERENCE; // Changed back into an analogue value of voltage.
 		
 		// As the hardware changes potential +/- 10V range to 0-3V, this calculation changes it back into the correct form.
 		// There is slight offset in the readings and the actual measure ment so offset is needed here in calculation.
-		float ADC2_output_dc_voltage = (((20 * ADC2_real_dc_voltage) - 30)/3) + ADC2_DC_OFFSET; 
+		float ADC2_output_dc_voltage = (((2 * ADC2_real_dc_voltage) - 3)/30) + ADC2_DC_OFFSET; 
 		
 		PB_LCD_Clear();
 		
 		// Reading is turned into a 16 bit string to be written to the 2x16 bit LCD screen.
 		char output_dc_voltage[50]; 
-		int output_dc_voltage_length = snprintf(output_dc_voltage, 50, "V-DC     %.4gmV", ADC2_output_dc_voltage);
+		int output_dc_voltage_length = snprintf(output_dc_voltage, 50, "V-DC     %.4gmV", ADC2_output_dc_voltage * 1000); // The ADC 2 reading is multiplied by 1000 to convert from volts to millivolts.
 		PB_LCD_WriteString(output_dc_voltage, output_dc_voltage_length);
 		PB_LCD_GoToXY(0, 1);
 		PB_LCD_WriteString("100mV", 50);
@@ -305,7 +306,7 @@ void dc_voltage(void) {
 		ADC_dc_sample_count = 1;
 		
 	} else { // For the ADC1 case in case the ADC reading is not in the ADC2 range.
-		float ADC1_real_dc_voltage = (ADC1_dc_raw_average/ADC1_RESOLUTION) * ADC_VOLTAGE_REFERENCE;
+		float ADC1_real_dc_voltage = (ADC1_dc_raw_average/ADC_RESOLUTION) * ADC_VOLTAGE_REFERENCE;
 		float ADC1_output_dc_voltage = (((20 * ADC1_real_dc_voltage) - 30)/3) + ADC1_DC_OFFSET;
 		
 		PB_LCD_Clear();
@@ -360,7 +361,7 @@ void resistance(void) {
 }
 
 // PA1 -> input 1 of ADC 1 and 2 set up here.
-void initialise_adc(void) {
+void initialise_adc1(void) {
 	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
 	GPIOA->MODER |= GPIO_MODER_MODE1_Msk;
 	GPIOA->OTYPER &= ~GPIO_OTYPER_OT1_Msk;
@@ -368,17 +369,28 @@ void initialise_adc(void) {
 	GPIOA->PUPDR &= ~GPIO_PUPDR_PUPD1_Msk;
 	
 	RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
-	RCC->APB2ENR |= RCC_APB2ENR_ADC2EN;
 	
 	ADC1->SQR3 &= 0xFFFFFFE0;
-	ADC2->SQR3 &= 0xFFFFFFE0;
 	
 	ADC1->SQR3 |= 0x00000001;
-	ADC2->SQR3 |= 0x00000001;
 	
 	ADC1->CR2 |= ADC_CR2_ADON_Msk;  
 	ADC1->CR1 |= ADC_CR1_DISCEN_Msk;
 	ADC1->CR2 |= ADC_CR2_EOCS_Msk;
+}
+
+void initialise_adc2(void) {
+	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+	GPIOA->MODER |= GPIO_MODER_MODE2_Msk;
+	GPIOA->OTYPER &= ~GPIO_OTYPER_OT2_Msk;
+	GPIOA->OSPEEDR &= ~GPIO_OSPEEDR_OSPEED2_Msk;
+	GPIOA->PUPDR &= ~GPIO_PUPDR_PUPD2_Msk;
+	
+	RCC->APB2ENR |= RCC_APB2ENR_ADC2EN;
+	
+	ADC2->SQR3 &= 0xFFFFFFE0;
+	
+	ADC2->SQR3 |= 0x00000002;
 	
 	ADC2->CR2 |= ADC_CR2_ADON_Msk; 
 	ADC2->CR1 |= ADC_CR1_DISCEN_Msk;
