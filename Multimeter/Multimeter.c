@@ -27,7 +27,11 @@ int startup_screen_status = 1;
 
 int sleep_tick_count = 0;
 int cache_sleep_tick_count = 0;
+
 const int STARTUP_SCREEN_DELAY = 5;
+
+int LCD_TIME_PASSED = 0;
+const int LCD_REFRESH_RATE_SECONDS = 6; // The refresh rate x2 as SysTick_Handler runs twice a second due to the system core clock. Ideally not set to anything under 2 as 1 second is the default refresh rate.
 
 const int BTN_DEBOUNCER_DELAY = 3;
 int btn_tick_count = 0;
@@ -99,16 +103,10 @@ void menu() {
 				ac_voltage();
 				break;
 			case 3 :
-				PB_LCD_Clear();				
-				PB_LCD_GoToXY (0, 0);
-				PB_LCD_WriteString("----Current ----", 50);
 				current();
 				break;
 			case 4 :
-				menu_select_counter = 0;
-				PB_LCD_Clear();				
-				PB_LCD_GoToXY (0, 0);
-				PB_LCD_WriteString("---Resistance---", 50);				
+				menu_select_counter = 0;				
 				resistance();
 				break;
 			default:
@@ -159,6 +157,7 @@ void SysTick_Handler(void){
 	sleep_tick_count++; // Counter used for delay.
 	btn_tick_count++; // Used in debouncing the button.
 	timer_cnt++; // Counter used to indicate 1 second has passed in the system in order to calculate the frequency of an input signal.
+	LCD_TIME_PASSED++;
 	
 }
 
@@ -230,7 +229,7 @@ void dc_voltage(void) {
 	PB_LCD_GoToXY (0, 0);
 	PB_LCD_WriteString("---DC Voltage---", 50); // Initial screen to indicate DC voltage measuring mode has been selected in the menu.
 	
-	// Instantiates the function specific (local) variables & constants.
+	// Instantiates the function specific (local) variables & constants. Make this into a global variable probably.
 	const int ADC_VOLTAGE_REFERENCE = 3;
 	const int ADC_RESOLUTION = 4096;
 	const float ADC1_DC_OFFSET = 0;
@@ -296,10 +295,13 @@ void dc_voltage(void) {
 		// Reading is turned into a 16 bit string to be written to the 2x16 bit LCD screen.
 		char output_dc_voltage[50]; 
 		int output_dc_voltage_length = snprintf(output_dc_voltage, 50, "V-DC     %.4gmV", ADC2_output_dc_voltage * 1000); // The ADC 2 reading is multiplied by 1000 to convert from volts to millivolts.
-		PB_LCD_WriteString(output_dc_voltage, output_dc_voltage_length);
-		PB_LCD_GoToXY(0, 1);
-		PB_LCD_WriteString("100mV", 50);
 		
+		if(LCD_TIME_PASSED == LCD_REFRESH_RATE_SECONDS){ // Displays the average reading every 3 seconds instead of one second to make readings clearer to read - can adjust the constant value to fit desired refresh rate.
+			PB_LCD_WriteString(output_dc_voltage, output_dc_voltage_length);
+			PB_LCD_GoToXY(0, 1);
+			PB_LCD_WriteString("100mV", 50); 
+			LCD_TIME_PASSED = 0;
+		}
 		
 		// Frees memory by making variable contents smaller.
 		ADC2_dc_reading_sum = ADC2_dc_raw_average;
@@ -312,9 +314,13 @@ void dc_voltage(void) {
 		PB_LCD_Clear();
 		char output_dc_voltage[50]; 
 		int output_dc_voltage_length = snprintf(output_dc_voltage, 50, "V-DC      %.4gV", ADC1_output_dc_voltage);
-		PB_LCD_WriteString(output_dc_voltage, output_dc_voltage_length);
-		PB_LCD_GoToXY(0, 1);
-		PB_LCD_WriteString("10V", 50);
+		
+		if(LCD_TIME_PASSED == LCD_REFRESH_RATE_SECONDS){
+			PB_LCD_WriteString(output_dc_voltage, output_dc_voltage_length);
+			PB_LCD_GoToXY(0, 1);
+			PB_LCD_WriteString("10V", 50);
+			LCD_TIME_PASSED = 0;
+		}
 		
 		ADC1_dc_reading_sum = ADC1_dc_raw_average;
 		ADC_dc_sample_count = 1;		
@@ -323,6 +329,10 @@ void dc_voltage(void) {
 
 void ac_voltage(void) {
 	// DAC->DHR12R1 = 2;
+	
+	// Used to reset the MUX input.
+	GPIOA->BSRR = 0x00400000;  
+	GPIOA->BSRR = 0x00800000;
 	
 	// Input 01 into the MUX.
 	GPIOA->BSRR = 0x00000040; // Should be the LSB.
@@ -339,25 +349,124 @@ void ac_voltage(void) {
 void current(void) {
 	// DAC->DHR12R1 = 3;
 	
+	// Used to reset the MUX input.
+	GPIOA->BSRR = 0x00400000;  
+	GPIOA->BSRR = 0x00800000;
+	
 	// Input 10.
 	GPIOA->BSRR = 0x00000080; // Should be the LSB.
 	GPIOA->BSRR = 0x00400000; // Should be the MSB.
 	
-	ADC1->CR2 |= ADC_CR2_SWSTART_Msk; 
-	while(ADC1->SR != (ADC1->SR | ADC_SR_EOC_Msk)){} 
-	adc1_conv = ADC1->DR;
+	PB_LCD_Clear(); // Clears whatever is previously written to the LCD screen
+	PB_LCD_GoToXY (0, 0);
+	PB_LCD_WriteString("----Current ----", 50);
+	
+	// Instantiates the function specific (local) variables & constants.
+	const int ADC_VOLTAGE_REFERENCE = 3;
+	const int ADC_RESOLUTION = 4096;
+	const float ADC_CURRENT_OFFSET = 0;
+	
+	delay(STARTUP_SCREEN_DELAY); // Waits few seconds to read the mode change before the screen changes to the voltmeter.
+	
+	PB_LCD_Clear();
+	PB_LCD_GoToXY(0,0);
+		
+	float ADC_current_raw_reading_sum = 0;
+	int ADC_current_sample_count = 0;
+		
+	while(timer_cnt != 2){
+		ADC1->CR2 |= ADC_CR2_SWSTART_Msk; 
+		while(ADC1->SR != (ADC1->SR | ADC_SR_EOC_Msk)){}
+			
+		adc1_conv = ADC1->DR; // Read only output from ADC, the final conversion of ADC
+		// ADC readings are summed to be divided by the amount of times the timer counter is incremented to in one second.
+		ADC_current_raw_reading_sum += adc1_conv; 
+	}
+	
+	if(timer_cnt == 2) {
+		ADC_current_sample_count = TIM1->CNT; // Stores timer count into a variable so can be divided easily.
+		TIM1->CNT = 0; // Resets counter for next reading -> does this need to be reset? Should an average of the frequency be taken I wonder?
+		timer_cnt = 0; // Resets timer count to 0 so it can count 1 second in the SysTick_Handler again.
+	}
+	
+	float ADC_current_raw_average = ADC_current_raw_reading_sum/ADC_current_sample_count;
+	float ADC_real_current_voltage = (ADC_current_raw_average/ADC_RESOLUTION) * ADC_VOLTAGE_REFERENCE;
+	float ADC_output_current = (((200 * ADC_real_current_voltage) - 300)/3) + ADC_CURRENT_OFFSET;
+	
+	PB_LCD_Clear();
+	char output_current[50]; 
+	int output_current_length = snprintf(output_current, 50, "CRNT     %.4gmA", ADC_output_current);
+	
+	if(LCD_TIME_PASSED == LCD_REFRESH_RATE_SECONDS){
+		PB_LCD_WriteString(output_current, output_current_length);
+		LCD_TIME_PASSED = 0;
+	}
+	
+	ADC_current_raw_reading_sum = ADC_current_raw_average;
+	ADC_current_sample_count = 1;	
 }
 
 void resistance(void) {
 	// DAC->DHR12R1 = 4;
 	
+	// Used to reset the MUX input.
+	GPIOA->BSRR = 0x00400000;  
+	GPIOA->BSRR = 0x00800000;
+	
 	// Input 11.
 	GPIOA->BSRR = 0x00000040; // Should be the LSB.
 	GPIOA->BSRR = 0x00000080; // Should be the MSB.
 	
-	ADC1->CR2 |= ADC_CR2_SWSTART_Msk; 
-	while(ADC1->SR != (ADC1->SR | ADC_SR_EOC_Msk)){} 
-	adc1_conv = ADC1->DR;
+	PB_LCD_Clear();				
+	PB_LCD_GoToXY (0, 0);
+	PB_LCD_WriteString("---Resistance---", 50);
+	
+	// Instantiates the function specific (local) variables & constants.
+	const int ADC_VOLTAGE_REFERENCE = 3;
+	const int ADC_RESOLUTION = 4096;
+	const float ADC_RESISTANCE_OFFSET = 0;
+	
+	delay(STARTUP_SCREEN_DELAY); // Waits few seconds to read the mode change before the screen changes to the voltmeter.
+	
+	PB_LCD_Clear();
+	PB_LCD_GoToXY(0,0);
+		
+	float ADC_resistance_raw_reading_sum = 0;
+	int ADC_resistance_sample_count = 0;
+		
+	while(timer_cnt != 2){
+		ADC1->CR2 |= ADC_CR2_SWSTART_Msk; 
+		while(ADC1->SR != (ADC1->SR | ADC_SR_EOC_Msk)){}
+			
+		adc1_conv = ADC1->DR; // Read only output from ADC, the final conversion of ADC
+		// ADC readings are summed to be divided by the amount of times the timer counter is incremented to in one second.
+		ADC_resistance_raw_reading_sum += adc1_conv; 
+	}
+	
+	if(timer_cnt == 2) {
+		ADC_resistance_sample_count = TIM1->CNT; // Stores timer count into a variable so can be divided easily.
+		TIM1->CNT = 0; // Resets counter for next reading -> does this need to be reset? Should an average of the frequency be taken I wonder?
+		timer_cnt = 0; // Resets timer count to 0 so it can count 1 second in the SysTick_Handler again.
+	}
+	
+	float ADC_resistance_raw_average = ADC_resistance_raw_reading_sum/ADC_resistance_sample_count;
+	float ADC_real_resistanve_voltage = (ADC_resistance_raw_average/ADC_RESOLUTION) * ADC_VOLTAGE_REFERENCE;
+	float ADC_output_resistance = ((1000000 * ADC_real_resistanve_voltage)/3) + ADC_RESISTANCE_OFFSET;
+	
+	PB_LCD_Clear();
+	PB_LCD_WriteString("RSTS", 50);
+	
+	char output_resistance[50]; 
+	int output_resistance_length = snprintf(output_resistance, 50, "    %.7g Ohms", ADC_output_resistance);
+	
+	if(LCD_TIME_PASSED == LCD_REFRESH_RATE_SECONDS){
+		PB_LCD_GoToXY(0,1);
+		PB_LCD_WriteString(output_resistance, output_resistance_length);
+		LCD_TIME_PASSED = 0;
+	}
+	
+	ADC_resistance_raw_reading_sum = ADC_resistance_raw_average;
+	ADC_resistance_sample_count = 1;	
 }
 
 // PA1 -> input 1 of ADC 1 and 2 set up here.
@@ -415,4 +524,3 @@ void mux_select_in(void) {
 	GPIOA->OSPEEDR &= ~GPIO_OSPEEDR_OSPEED7_Msk;
 	GPIOA->PUPDR &= ~GPIO_PUPDR_PUPD7_Msk;	
 }
-
