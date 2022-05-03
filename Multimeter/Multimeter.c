@@ -12,7 +12,6 @@ void EXTI0_IRQHandler(void);
 void initialise_adc1(void);
 void initialise_adc2(void);
 void timer_counter_setup(void);
-void dac_out(void);
 void mux_select_in(void);
 
 void dc_voltage(void);
@@ -65,7 +64,8 @@ int main() {
 	PB_LCD_Init(); // Initialises the LCD screen
 	initialise_adc1();
 	initialise_adc2();
-	dac_out();
+	//timer_counter_setup();
+	mux_select_in();
 	
 	while(1) {
 		// Start screen of multimeter, flashes through 2 different screens.
@@ -100,7 +100,7 @@ void menu() {
 				PB_LCD_Clear();			
 				PB_LCD_GoToXY (0, 0);
 				PB_LCD_WriteString("---AC Voltage---", 50);
-				ac_voltage();
+				//ac_voltage();
 				break;
 			case 3 :
 				current();
@@ -124,11 +124,11 @@ void menu() {
 void configPA0(void) { 
 	// Configures PA0 as a input.
 	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
-	GPIOA->MODER &= ~GPIO_MODER_MODE0_Msk;
-	GPIOA->OTYPER &= ~GPIO_OTYPER_OT0_Msk;
-	GPIOA->OSPEEDR &= ~GPIO_OSPEEDR_OSPEED0_Msk;
-	GPIOA->PUPDR &= ~GPIO_PUPDR_PUPD0_Msk;
-	GPIOA->PUPDR |= 1 << GPIO_PUPDR_PUPD0_Pos;
+	GPIOE->MODER &= ~GPIO_MODER_MODE0_Msk;
+	GPIOE->OTYPER &= ~GPIO_OTYPER_OT0_Msk;
+	GPIOE->OSPEEDR &= ~GPIO_OSPEEDR_OSPEED0_Msk;
+	GPIOE->PUPDR &= ~GPIO_PUPDR_PUPD0_Msk;
+	GPIOE->PUPDR |= 1 << GPIO_PUPDR_PUPD0_Pos;
 		
 	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; // Enables System config
 	SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI0_PA; // PA0 -> config interrupt to come from PA0
@@ -155,7 +155,7 @@ void SysTick_Handler(void){
 		GPIOA->BSRR |= 0x00010000;
 	}
 	sleep_tick_count++; // Counter used for delay.
-	btn_tick_count++; // Used in debouncing the button.
+	//btn_tick_count++; // Used in debouncing the button.
 	timer_cnt++; // Counter used to indicate 1 second has passed in the system in order to calculate the frequency of an input signal.
 	LCD_TIME_PASSED++;
 	
@@ -163,26 +163,17 @@ void SysTick_Handler(void){
 
 void EXTI0_IRQHandler(void) { // The interrupt handler for the button.
 	EXTI->PR = EXTI_PR_PR0;
-	if (checkButton()) { // Debouncer not done yet.
-		buttonState = 1;
-		startup_screen_status = 0;
-		int current_btn_tick_count = btn_tick_count;
-		cache_btn_tick_count = current_btn_tick_count;
-		int ticks_elapsed = current_btn_tick_count - cache_btn_tick_count;
-		if (ticks_elapsed >= BTN_DEBOUNCER_DELAY) {
-			menu_select_counter++;
-			if(menu_select_counter > 4) {
-				menu_select_counter = 0;	
-			}
-			menu();
-		}
-	}
 	if (checkButton()) {
-		
+		buttonState = 1;
+		menu_select_counter++;
+		if(menu_select_counter > 4) menu_select_counter = 0;	
+		startup_screen_status = 0;
+		menu();
 	}
 }
 
 void timer_counter_setup(void){
+	
 	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOEEN;
 	RCC->APB2ENR |= RCC_APB2ENR_TIM1EN;// Enables TIM1
 	
@@ -208,20 +199,11 @@ void timer_counter_setup(void){
 	*/
 }
 
-// Configures PA4 as a DAC output.
-void dac_out(void) { 
-	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
-	GPIOA->MODER |= GPIO_MODER_MODE4_Msk; // (GPIOA->MODER & ~GPIO_MODER_MODER4_Msk) | (0x11 << GPIO_MODER_MODER4_Pos);
-	GPIOA->OTYPER &= ~GPIO_OTYPER_OT4_Msk;
-	GPIOA->OSPEEDR &= ~GPIO_OSPEEDR_OSPEED4_Msk;
-	GPIOA->PUPDR &= ~GPIO_PUPDR_PUPD4_Msk;
-}
 
 void dc_voltage(void) {
-	// DAC->DHR12R1 = 1; // Can connect a wire from PA4 to the mux to receive this input & decide what mode is selected (corresponds to the number in the menu). Unconventional so scrapped until further notice
 	
-	GPIOA->BSRR = 0x00400000;  // Should be the LSB.
-	GPIOA->BSRR = 0x00800000; // Should be the MSB.
+	GPIOB->BSRR = 0x00800000;  // Should be the LSB.
+	GPIOB->BSRR = 0x01000000; // Should be the MSB.
 	// Sets PA6 & PA7 to 0. Don't really need to do this as the values are set to 0 by default but just in case really.
 	// Can connect a wire from PA6 & PA7 to the mux to receive the 2 inputs & decide what mode is selected (2 bits of binary correspond to the menu option (-1)).
 	
@@ -235,15 +217,13 @@ void dc_voltage(void) {
 	const float ADC1_DC_OFFSET = 0;
 	const float ADC2_DC_OFFSET = 0;
 	
-	delay(STARTUP_SCREEN_DELAY); // Waits few seconds to read the mode change before the screen changes to the voltmeter.
+	//delay(STARTUP_SCREEN_DELAY); // Waits few seconds to read the mode change before the screen changes to the voltmeter.
 	
 	PB_LCD_Clear();
 	PB_LCD_GoToXY(0,0);
 		
 	float ADC1_dc_reading_sum = 0;
-	int ADC1_dc_sample_count = 0;
 	float ADC2_dc_reading_sum = 0;
-	int ADC2_dc_sample_count = 0;
 	
 	// As the SysTick_Handler runs twice a second, the timer used as a counter will take readings from the ADC 
 	// 		until the SysTick_Handler runs the second time.
@@ -255,8 +235,9 @@ void dc_voltage(void) {
 		// ADC readings are summed to be divided by the amount of times the timer counter is incremented to in one second.
 		ADC1_dc_reading_sum += adc1_conv; 
 	}
-	
-	if(timer_cnt == 2) {
+
+	if(timer_cnt == 2) { // program does not enter this for some reason
+		//PB_LCD_WriteString("Reading", 50);
 		ADC_dc_sample_count = TIM1->CNT; // Stores timer count into a variable so can be divided easily.
 		TIM1->CNT = 0; // Resets counter for next reading -> does this need to be reset? Should an average of the frequency be taken I wonder?
 		timer_cnt = 0; // Resets timer count to 0 so it can count 1 second in the SysTick_Handler again.
@@ -328,15 +309,14 @@ void dc_voltage(void) {
 }
 
 void ac_voltage(void) {
-	// DAC->DHR12R1 = 2;
 	
 	// Used to reset the MUX input.
-	GPIOA->BSRR = 0x00400000;  
-	GPIOA->BSRR = 0x00800000;
+	GPIOB->BSRR = 0x00800000;  
+	GPIOB->BSRR = 0x01000000;
 	
 	// Input 01 into the MUX.
-	GPIOA->BSRR = 0x00000040; // Should be the LSB.
-	GPIOA->BSRR = 0x00800000; // Should be the MSB.
+	GPIOB->BSRR = 0x00000080; // Should be the LSB.
+	GPIOB->BSRR = 0x01000000; // Should be the MSB.
 	
 	ADC1->CR2 |= ADC_CR2_SWSTART_Msk; 
 	while(ADC1->SR != (ADC1->SR | ADC_SR_EOC_Msk)){} 
@@ -347,15 +327,15 @@ void ac_voltage(void) {
 }
 
 void current(void) {
-	// DAC->DHR12R1 = 3;
 	
 	// Used to reset the MUX input.
-	GPIOA->BSRR = 0x00400000;  
-	GPIOA->BSRR = 0x00800000;
+	GPIOB->BSRR = 0x00800000;  
+	GPIOB->BSRR = 0x01000000;
 	
 	// Input 10.
-	GPIOA->BSRR = 0x00000080; // Should be the LSB.
-	GPIOA->BSRR = 0x00400000; // Should be the MSB.
+	GPIOB->BSRR = 0x00800000; // Should be the LSB.
+	GPIOB->BSRR = 0x00000100; // Should be the MSB.
+	 
 	
 	PB_LCD_Clear(); // Clears whatever is previously written to the LCD screen
 	PB_LCD_GoToXY (0, 0);
@@ -407,15 +387,14 @@ void current(void) {
 }
 
 void resistance(void) {
-	// DAC->DHR12R1 = 4;
 	
 	// Used to reset the MUX input.
-	GPIOA->BSRR = 0x00400000;  
-	GPIOA->BSRR = 0x00800000;
+	GPIOB->BSRR = 0x00800000;  
+	GPIOB->BSRR = 0x01000000;
 	
 	// Input 11.
-	GPIOA->BSRR = 0x00000040; // Should be the LSB.
-	GPIOA->BSRR = 0x00000080; // Should be the MSB.
+	GPIOB->BSRR = 0x00000080; // Should be the LSB.
+	GPIOB->BSRR = 0x00000100; // Should be the MSB.
 	
 	PB_LCD_Clear();				
 	PB_LCD_GoToXY (0, 0);
@@ -469,58 +448,59 @@ void resistance(void) {
 	ADC_resistance_sample_count = 1;	
 }
 
-// PA1 -> input 1 of ADC 1 and 2 set up here.
+// PA1 -> input 1 of ADC 1 and 2 set up here. change to PC4
 void initialise_adc1(void) {
-	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
-	GPIOA->MODER |= GPIO_MODER_MODE1_Msk;
-	GPIOA->OTYPER &= ~GPIO_OTYPER_OT1_Msk;
-	GPIOA->OSPEEDR &= ~GPIO_OSPEEDR_OSPEED1_Msk;
-	GPIOA->PUPDR &= ~GPIO_PUPDR_PUPD1_Msk;
+	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOCEN;
+	GPIOC->MODER |= GPIO_MODER_MODE4_Msk;
+	GPIOC->OTYPER &= ~GPIO_OTYPER_OT4_Msk;
+	GPIOC->OSPEEDR &= ~GPIO_OSPEEDR_OSPEED4_Msk;
+	GPIOC->PUPDR &= ~GPIO_PUPDR_PUPD4_Msk;
 	
 	RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
 	
 	ADC1->SQR3 &= 0xFFFFFFE0;
 	
-	ADC1->SQR3 |= 0x00000001;
+	ADC1->SQR3 |= 0x00000004;
 	
 	ADC1->CR2 |= ADC_CR2_ADON_Msk;  
 	ADC1->CR1 |= ADC_CR1_DISCEN_Msk;
 	ADC1->CR2 |= ADC_CR2_EOCS_Msk;
 }
 
-void initialise_adc2(void) {
-	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
-	GPIOA->MODER |= GPIO_MODER_MODE2_Msk;
-	GPIOA->OTYPER &= ~GPIO_OTYPER_OT2_Msk;
-	GPIOA->OSPEEDR &= ~GPIO_OSPEEDR_OSPEED2_Msk;
-	GPIOA->PUPDR &= ~GPIO_PUPDR_PUPD2_Msk;
+void initialise_adc2(void) { // change to PC5
+	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOCEN;
+	GPIOC->MODER |= GPIO_MODER_MODE5_Msk;
+	GPIOC->OTYPER &= ~GPIO_OTYPER_OT5_Msk;
+	GPIOC->OSPEEDR &= ~GPIO_OSPEEDR_OSPEED5_Msk;
+	GPIOC->PUPDR &= ~GPIO_PUPDR_PUPD5_Msk;
 	
 	RCC->APB2ENR |= RCC_APB2ENR_ADC2EN;
 	
 	ADC2->SQR3 &= 0xFFFFFFE0;
 	
-	ADC2->SQR3 |= 0x00000002;
+	ADC2->SQR3 |= 0x00000005;
 	
 	ADC2->CR2 |= ADC_CR2_ADON_Msk; 
 	ADC2->CR1 |= ADC_CR1_DISCEN_Msk;
 	ADC2->CR2 |= ADC_CR2_EOCS_Msk;
 }
 
+
 void mux_select_in(void) {
-	// Setup PA6 & PA7 as digital outputs so can be set to 0 or 1 via the BSRR.
-	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+	// Setup PA6 & PA7 as digital outputs so can be set to 0 or 1 via the BSRR. LSB to PB7 MSB to PB8
+	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOBEN;
 	
-	// PA6 to be select 1 of the MUX.
-	GPIOA->MODER &= ~GPIO_MODER_MODE6_Msk;
-	GPIOA->MODER |= 1 << GPIO_MODER_MODE6_Pos;
-	GPIOA->OTYPER &= ~GPIO_OTYPER_OT6_Msk;
-	GPIOA->OSPEEDR &= ~GPIO_OSPEEDR_OSPEED6_Msk;
-	GPIOA->PUPDR &= ~GPIO_PUPDR_PUPD6_Msk;
+	// PA6 to be select 1 of the MUX. PB7
+	GPIOB->MODER &= ~GPIO_MODER_MODE7_Msk;
+	GPIOB->MODER |= 1 << GPIO_MODER_MODE7_Pos;
+	GPIOB->OTYPER &= ~GPIO_OTYPER_OT7_Msk;
+	GPIOB->OSPEEDR &= ~GPIO_OSPEEDR_OSPEED7_Msk;
+	GPIOB->PUPDR &= ~GPIO_PUPDR_PUPD7_Msk;
 	
-	// PA7 to be select 2 of the MUX.
-	GPIOA->MODER &= ~GPIO_MODER_MODE7_Msk;
-	GPIOA->MODER |= 1 << GPIO_MODER_MODE7_Pos;
-	GPIOA->OTYPER &= ~GPIO_OTYPER_OT7_Msk;
-	GPIOA->OSPEEDR &= ~GPIO_OSPEEDR_OSPEED7_Msk;
-	GPIOA->PUPDR &= ~GPIO_PUPDR_PUPD7_Msk;	
+	// PA7 to be select 2 of the MUX. PB8
+	GPIOB->MODER &= ~GPIO_MODER_MODE8_Msk;
+	GPIOB->MODER |= 1 << GPIO_MODER_MODE8_Pos;
+	GPIOB->OTYPER &= ~GPIO_OTYPER_OT8_Msk;
+	GPIOB->OSPEEDR &= ~GPIO_OSPEEDR_OSPEED8_Msk;
+	GPIOB->PUPDR &= ~GPIO_PUPDR_PUPD8_Msk;	
 }
