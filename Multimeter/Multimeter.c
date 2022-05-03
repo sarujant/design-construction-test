@@ -460,7 +460,7 @@ void initialise_adc1(void) {
 	
 	ADC1->SQR3 &= 0xFFFFFFE0;
 	
-	ADC1->SQR3 |= 0x00000004;
+	ADC1->SQR3 |= 0x0000000E;
 	
 	ADC1->CR2 |= ADC_CR2_ADON_Msk;  
 	ADC1->CR1 |= ADC_CR1_DISCEN_Msk;
@@ -478,7 +478,7 @@ void initialise_adc2(void) { // change to PC5
 	
 	ADC2->SQR3 &= 0xFFFFFFE0;
 	
-	ADC2->SQR3 |= 0x00000005;
+	ADC2->SQR3 |= 0x0000000F;
 	
 	ADC2->CR2 |= ADC_CR2_ADON_Msk; 
 	ADC2->CR1 |= ADC_CR1_DISCEN_Msk;
